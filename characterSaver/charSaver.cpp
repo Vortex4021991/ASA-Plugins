@@ -12,6 +12,7 @@ namespace
 {
     FString g_serverSaveDir;
 
+    // Building path to the Serversave directory
     void BuildServerSaveDir()
     {
         UWorld* world = AsaApi::GetApiUtils().GetWorld();
