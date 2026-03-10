@@ -17,7 +17,7 @@ The source code is publicly available to support transparency, learning, and com
 
 All my codes are free to use, no subscription, no buying.
 
-If you like to thank or support me you can do so here: [Support Me]([https://github.com/ServersHub/ServerAPI](https://streamlabs.com/sl_id_56c0e84c-97e2-3353-8125-36727b7a307c/tip))
+If you like to thank or support me you can do so here: [Support Me](https://streamlabs.com/sl_id_56c0e84c-97e2-3353-8125-36727b7a307c/tip)
 
 ---
 
@@ -28,3 +28,4 @@ This project is licensed under the [Vortex ASA Plugins Non-Commercial License](L
 Modification and redistribution are allowed with attribution.  
 
 Commercial usage or resale is not permitted without prior written permission.
+
