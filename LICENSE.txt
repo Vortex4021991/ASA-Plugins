@@ -1,0 +1,31 @@
+Vortex ASA Plugins License (Non-Commercial)
+
+Copyright (c) 2026 Vortex
+
+Permission is granted, free of charge, to any person obtaining a copy of this
+software and associated documentation files (the "Software") to use, copy,
+modify, and redistribute the Software under the following conditions:
+
+1. Attribution
+   Any use of this Software, or substantial portions of it, must clearly
+   credit the original author "Vortex" and include a link to the original
+   repository.
+
+2. Redistribution
+   Redistribution of the Software, with or without modification, is permitted
+   provided this license and copyright notice are included in all copies
+   or substantial portions of the Software.
+
+3. Non-Commercial Use Only
+   The Software and any derivative works may not be sold, sublicensed,
+   included in paid products, included in commercial server packages,
+   or distributed as part of any commercial service without explicit
+   written permission from the author.
+
+4. No Warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+   THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+   IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
