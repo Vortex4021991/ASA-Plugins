@@ -1,114 +1,67 @@
 #include <API/ARK/Ark.h>
 #include <API/ARK/UE.h>
 #include <IApiUtils.h>
-#include <Logger/Logger.h>
+#include <IHooks.h>
 
+#include <algorithm>
+#include <cstring>
 #include <filesystem>
-#include <shellapi.h>
-
-using std::filesystem::path;
+#include <string>
 
 namespace
 {
-    FString gSavePath;
+    FString g_serverSaveDir;
 
-    struct FServerIds
+    void BuildServerSaveDir()
     {
-        FString MapName;
-        FString ServerKey;
-    };
+        UWorld* world = AsaApi::GetApiUtils().GetWorld();
+        AShooterGameMode* gameMode = AsaApi::GetApiUtils().GetShooterGameMode();
 
-    bool TryGetAltSaveDirectoryName(FString& outName)
-    {
-        outName.Empty();
+        if (!world || !gameMode)
+            return;
 
-        int argc = 0;
-        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-        if (!argv)
-            return false;
+        const FString saveDir = gameMode->GetSaveDirectoryName(world, ESaveType::Map, false, true);
 
-        const FString param = L"AltSaveDirectoryName=";
+        std::string baseDir = AsaApi::Tools::GetCurrentDir();
+        const size_t pos = baseDir.rfind("Binaries\\Win64");
 
-        for (int i = 0; i < argc; ++i)
-        {
-            FString arg(argv[i]);
-            const int32 index = arg.Find(param);
+        if (pos != std::string::npos)
+            baseDir.replace(pos, std::strlen("Binaries\\Win64"), "Saved\\");
+        else
+            baseDir += "\\Saved\\";
 
-            if (index != INDEX_NONE)
-            {
-                FString value = arg.Mid(index + param.Len());
+        FTCHARToUTF8 conv(*saveDir);
+        std::string relativeDir(conv.Get(), conv.Length());
 
-                int32 qpos;
-                if (value.FindChar('?', qpos))
-                    value = value.Left(qpos);
+        std::replace(relativeDir.begin(), relativeDir.end(), '/', '\\');
 
-                outName = value;
-                break;
-            }
-        }
+        while (!relativeDir.empty() && (relativeDir.back() == '\\' || relativeDir.back() == '/'))
+            relativeDir.pop_back();
 
-        LocalFree(argv);
-        return !outName.IsEmpty();
-    }
+        if (!baseDir.empty() && baseDir.back() != '\\')
+            baseDir.push_back('\\');
 
-    FServerIds GetServerIds()
-    {
-        FServerIds ids;
+        while (!relativeDir.empty() && relativeDir.front() == '\\')
+            relativeDir.erase(relativeDir.begin());
 
-        if (auto* gm = AsaApi::GetApiUtils().GetShooterGameMode())
-            gm->GetMapName(&ids.MapName);
-
-        TryGetAltSaveDirectoryName(ids.ServerKey);
-        return ids;
-    }
-
-    FString GetPerServerSavePath()
-    {
-        const FServerIds ids = GetServerIds();
-
-        if (ids.ServerKey.IsEmpty() || ids.MapName.IsEmpty())
-            return FString();
-
-        const auto currentDir = AsaApi::Tools::GetCurrentDir();
-        std::filesystem::path base(currentDir);
-        std::filesystem::path shooterGame;
-
-        for (std::filesystem::path it = base; !it.empty(); it = it.parent_path())
-        {
-            if (_wcsicmp(it.filename().c_str(), L"ShooterGame") == 0)
-            {
-                shooterGame = it;
-                break;
-            }
-        }
-
-        if (shooterGame.empty())
-            shooterGame = base.parent_path();
-
-        const std::wstring serverKey(*ids.ServerKey);
-        const std::wstring mapName(*ids.MapName);
-
-        const std::filesystem::path target = shooterGame / L"Saved" / serverKey / mapName;
-
-        std::error_code ec;
-        std::filesystem::create_directories(target, ec);
-
-        return FString(target.c_str());
+        g_serverSaveDir = UTF8_TO_TCHAR((baseDir + relativeDir).c_str());
     }
 
     bool DoesArkProfileExist(const FString& eosId)
     {
-        const std::wstring filename = *eosId + std::wstring(L".arkprofile");
-        const std::wstring basePath = *gSavePath;
-        const std::wstring fullPath = basePath + L"\\" + filename;
+        if (g_serverSaveDir.IsEmpty() || eosId.IsEmpty())
+            return false;
+
+        const std::wstring fullPath =
+            std::wstring(*g_serverSaveDir) + L"\\" + std::wstring(*eosId) + L".arkprofile";
 
         return std::filesystem::exists(fullPath);
     }
 
-    void CheckPlayerSave(AShooterPlayerController* player)
+    void EnsurePlayerSave(AShooterPlayerController* player)
     {
-        if (gSavePath.IsEmpty())
-            gSavePath = GetPerServerSavePath();
+        if (!player)
+            return;
 
         const FString eosId = AsaApi::GetApiUtils().GetEOSIDFromController(player);
 
@@ -120,60 +73,30 @@ namespace
     }
 }
 
-DECLARE_HOOK(AShooterPlayerController_BeginPlay, void, AShooterPlayerController*);
-void Hook_AShooterPlayerController_BeginPlay(AShooterPlayerController* player)
+DECLARE_HOOK(AShooterPlayerController_OnPossess, void, AShooterPlayerController*, APawn*);
+void Hook_AShooterPlayerController_OnPossess(AShooterPlayerController* playerController, APawn* inPawn)
 {
-    AShooterPlayerController_BeginPlay_original(player);
-    CheckPlayerSave(player);
-}
+    AShooterPlayerController_OnPossess_original(playerController, inPawn);
 
-DECLARE_HOOK(AShooterGameMode_Tick, void, AShooterGameMode*, float);
-void Hook_AShooterGameMode_Tick(AShooterGameMode* gm, float deltaSeconds)
-{
-    AShooterGameMode_Tick_original(gm, deltaSeconds);
-
-    static float accum = 0.0f;
-    accum += deltaSeconds;
-
-    if (accum < 60.0f)
+    if (!inPawn || !inPawn->IsA(AShooterCharacter::StaticClass()))
         return;
 
-    accum = 0.0f;
-
-    UWorld* world = AsaApi::GetApiUtils().GetWorld();
-    if (!world)
-        return;
-
-    const auto playerControllers = world->PlayerControllerListField();
-    for (auto pcWeak : playerControllers)
-    {
-        if (auto* pc = static_cast<AShooterPlayerController*>(pcWeak.Get()))
-            CheckPlayerSave(pc);
-    }
+    EnsurePlayerSave(playerController);
 }
 
 extern "C" __declspec(dllexport) void Plugin_Init()
 {
-    gSavePath = GetPerServerSavePath();
+    BuildServerSaveDir();
 
     AsaApi::GetHooks().SetHook(
-        "AShooterPlayerController.BeginPlay()",
-        &Hook_AShooterPlayerController_BeginPlay,
-        &AShooterPlayerController_BeginPlay_original);
-
-    AsaApi::GetHooks().SetHook(
-        "AShooterGameMode.Tick(float)",
-        &Hook_AShooterGameMode_Tick,
-        &AShooterGameMode_Tick_original);
+        "AShooterPlayerController.OnPossess(APawn*)",
+        &Hook_AShooterPlayerController_OnPossess,
+        &AShooterPlayerController_OnPossess_original);
 }
 
 extern "C" __declspec(dllexport) void Plugin_Unload()
 {
     AsaApi::GetHooks().DisableHook(
-        "AShooterPlayerController.BeginPlay()",
-        &Hook_AShooterPlayerController_BeginPlay);
-
-    AsaApi::GetHooks().DisableHook(
-        "AShooterGameMode.Tick(float)",
-        &Hook_AShooterGameMode_Tick);
+        "AShooterPlayerController.OnPossess(APawn*)",
+        &Hook_AShooterPlayerController_OnPossess);
 }
