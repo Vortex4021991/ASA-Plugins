@@ -1,148 +1,125 @@
 #include <API/ARK/Ark.h>
 #include <IApiUtils.h>
+#include <ICommands.h>
 
-#include <Windows.h>
-
-#include <atomic>
-#include <chrono>
+#include <windows.h>
 #include <string>
-#include <thread>
 
-namespace
+static int    g_scanIntervalSec = 300; // Default: 5 Minutes
+static int    g_honeyAmount = 10;      // Default: 10 Honey
+static int    g_elapsedSec = 0;
+static bool   g_enabled = false;
+static UClass* g_honeyClass = nullptr;
+
+static const FString kHoneyClassPath =
+L"Blueprint'/Game/PrimalEarth/CoreBlueprints/Items/Consumables/PrimalItemConsumable_Honey.PrimalItemConsumable_Honey'";
+
+inline std::wstring ToWString(const std::string& str)
 {
-    std::atomic_bool g_running{ false };
-    std::thread g_worker;
+    return std::wstring(str.begin(), str.end());
+}
 
-    int g_scanIntervalSec = 300; // Default: 5 minutes
-    int g_honeyAmount = 10;      // Default: 10 honey
+static bool IsPlayerOwnedBeeHive(AActor* actor)
+{
+    // Changed to only player hives
+    if (!actor || !actor->IsPrimalStructure())
+        return false;
 
-    inline std::wstring ToWString(const std::string& str)
+    const FString bpPath = AsaApi::GetApiUtils().GetClassBlueprint(actor->ClassField());
+    return bpPath.Contains(TEXT("BeeHive_PlayerOwned"));
+}
+
+static void ScanBeeHivesAndAddHoney()
+{
+    auto& utils = AsaApi::GetApiUtils();
+
+    UWorld* world = utils.GetWorld();
+    if (!world)
+        return;
+
+    if (!g_honeyClass)
     {
-        return std::wstring(str.begin(), str.end());
+        g_honeyClass = UVictoryCore::BPLoadClass(kHoneyClassPath);
+        if (!g_honeyClass)
+            return;
     }
 
-    void WorkerLoop()
+    TArray<AActor*> actors;
+    UGameplayStatics::GetAllActorsOfClass(world, APrimalStructure::GetPrivateStaticClass(), &actors);
+
+    for (AActor* actor : actors)
     {
-        auto& utils = AsaApi::GetApiUtils();
+        if (!IsPlayerOwnedBeeHive(actor))
+            continue;
 
-        while (g_running.load())
-        {
-            try
-            {
-                UWorld* world = utils.GetWorld();
-                if (world)
-                {
-                    const FString honeyPath =
-                        L"Blueprint'/Game/PrimalEarth/CoreBlueprints/Items/Consumables/"
-                        L"PrimalItemConsumable_Honey.PrimalItemConsumable_Honey'";
+        if (!actor->IsA(APrimalStructureItemContainer::StaticClass()))
+            continue;
 
-                    UClass* honeyClass = UVictoryCore::BPLoadClass(honeyPath);
-                    if (honeyClass)
-                    {
-                        TArray<AActor*> actors;
-                        UGameplayStatics::GetAllActorsOfClass(
-                            world,
-                            APrimalStructure::GetPrivateStaticClass(),
-                            &actors);
+        auto* hive = static_cast<APrimalStructureItemContainer*>(actor);
+        if (!hive)
+            continue;
 
-                        for (AActor* actor : actors)
-                        {
-                            if (!actor || !actor->IsPrimalStructure())
-                                continue;
+        auto* inv = hive->MyInventoryComponentField();
+        if (!inv)
+            continue;
 
-                            const FString bpPath = utils.GetClassBlueprint(actor->ClassField());
-                            if (!bpPath.Contains("BeeHive"))
-                                continue;
-
-                            if (!actor->IsA(APrimalStructureItemContainer::StaticClass()))
-                                continue;
-
-                            auto* hive = static_cast<APrimalStructureItemContainer*>(actor);
-                            auto* inventory = hive->MyInventoryComponentField();
-                            if (!inventory)
-                                continue;
-
-                            auto* defaultObject =
-                                static_cast<UPrimalItem*>(honeyClass->GetDefaultObject(true));
-                            if (!defaultObject)
-                                continue;
-
-                            UPrimalItem::AddNewItem(
-                                TSubclassOf<UPrimalItem>(honeyClass),
-                                inventory,
-                                false,
-                                false,
-                                0.0f,
-                                true,
-                                g_honeyAmount,
-                                false,
-                                0.0f,
-                                true,
-                                TSubclassOf<UPrimalItem>(),
-                                0.0f,
-                                false,
-                                false,
-                                true,
-                                false,
-                                true);
-                        }
-                    }
-                }
-            }
-            catch (...)
-            {
-            }
-
-            for (int i = 0; i < g_scanIntervalSec && g_running.load(); ++i)
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
+        UPrimalItem::AddNewItem(
+            TSubclassOf<UPrimalItem>(g_honeyClass),
+            inv,
+            false, false, 0.0f,
+            true, g_honeyAmount,
+            false, 0.0f, true,
+            TSubclassOf<UPrimalItem>(),
+            0.0f, false, false,
+            true, false, true);
     }
+}
+
+static void OnHoneyBoostTimer()
+{
+    if (!g_enabled)
+        return;
+
+    ++g_elapsedSec;
+    if (g_elapsedSec < g_scanIntervalSec)
+        return;
+
+    g_elapsedSec = 0;
+    ScanBeeHivesAndAddHoney();
 }
 
 extern "C" __declspec(dllexport) void Plugin_Init()
 {
-    const std::wstring iniPath = ToWString(AsaApi::Tools::GetCurrentDir()) + L"\\HoneyBoost.ini";
+    std::wstring iniPath = ToWString(AsaApi::Tools::GetCurrentDir()) + L"\\HoneyBoost.ini";
 
     wchar_t buffer[32]{};
 
-    // [HoneyBoost] IntervalMinutes
-    GetPrivateProfileStringW(
-        L"HoneyBoost",
-        L"IntervalMinutes",
-        L"5",
-        buffer,
-        32,
-        iniPath.c_str());
-
+    GetPrivateProfileStringW(L"HoneyBoost", L"IntervalMinutes", L"5", buffer, 32, iniPath.c_str());
     int interval = _wtoi(buffer);
     if (interval < 1)
         interval = 1;
-
     g_scanIntervalSec = interval * 60;
 
-    // [HoneyBoost] HoneyAmount
-    GetPrivateProfileStringW(
-        L"HoneyBoost",
-        L"HoneyAmount",
-        L"10",
-        buffer,
-        32,
-        iniPath.c_str());
-
+    GetPrivateProfileStringW(L"HoneyBoost", L"HoneyAmount", L"10", buffer, 32, iniPath.c_str());
     int amount = _wtoi(buffer);
     if (amount < 1)
         amount = 1;
-
     g_honeyAmount = amount;
 
-    g_running = true;
-    g_worker = std::thread(WorkerLoop);
+    g_elapsedSec = 0;
+    g_enabled = true;
+    g_honeyClass = nullptr;
+
+    // saver looptimer
+    AsaApi::GetCommands().AddOnTimerCallback(TEXT("HoneyBoostTimer"), []()
+        {
+            OnHoneyBoostTimer();
+        });
 }
 
 extern "C" __declspec(dllexport) void Unload()
 {
-    g_running = false;
-
-    if (g_worker.joinable())
-        g_worker.join();
+    g_enabled = false;
+    AsaApi::GetCommands().RemoveOnTimerCallback(TEXT("HoneyBoostTimer"));
+    g_honeyClass = nullptr;
 }
